@@ -4,59 +4,68 @@ const pg = require('pg');
 const fastcsv = require('fast-csv');
 const express = require('express');
 var stringify = require('csv-stringify');
+const QueryStream = require('pg-query-stream');
 const createCsvStringifier = require('csv-writer').createObjectCsvStringifier;
+const csvWriter = require("csv-write-stream");
 
 const app = express();
-const client = new pg.Pool(config.DBCONFIG);
+const pool = new pg.Pool(config.DBCONFIG);
 
-var streamDownloadHandler = function (request, response) {
+var streamDownloadHandler = async function (request, response) {
     response.status(200)
-    response.setHeader('Content-disposition', 'attachment; filename=employees.csv')
+    response.setHeader('Content-disposition', 'attachment; filename=employees_db_stream.csv')
     response.setHeader('Content-type', 'text/csv')
 
-    client.query(`SELECT * FROM "Employees" LIMIT 300000`, (err, result) => {
-        if (err) console.log("client.query()", err.stack)
-    
-        if (result) {     
-            const jsonData = JSON.parse(JSON.stringify(result.rows));
+    var writer = csvWriter();
 
-            fastcsv
-                .write(jsonData, { headers: true })
-                .pipe(response)
-                .on('end', () => console.log(`Stream complete.`));
-        }
+    pool.connect(async (err, client) => {
+        if (err) console.log("pool.connect()", err.stack)
+
+        const query = new QueryStream(`SELECT * FROM "Employees" LIMIT 1000000`);
+        var stream = client.query(query);
+
+        writer.pipe(response)
+        stream.pipe(writer)
+
+        client.release()
     })
 }
 
-var nonStreamDownloadHandler = function (request, response) {
+var bufferDownloadHandler = function (request, response) {
     response.status(200)
-    response.setHeader('Content-disposition', 'attachment; filename=employees.csv')
+    response.setHeader('Content-disposition', 'attachment; filename=employees_memory_buffer.csv')
     response.setHeader('Content-type', 'text/csv')
 
-    client.query(`SELECT * FROM "Employees" LIMIT 300000`, (err, result) => {
+    pool.query(`SELECT * FROM "Employees" LIMIT 1000000`, (err, result) => {
         if (err) console.log("client.query()", err.stack);
 
         if (result) {
-            // Method 1
+            // Method #1
+            fastcsv
+                .write(result.rows, { headers: true })
+                .pipe(response)
+                .on('end', () => console.log(`Stream complete.`));
+
+            // Method #2
             // stringify(result.rows, { header: true }, (err, output) => 
             //     response.send(output)
             // )
 
-            // Method 2
-            const csvStringifier = createCsvStringifier({
-                header: [
-                    {id: 'Id', title: 'Id'},
-                    {id: 'Name', title: 'Name'},
-                    {id: 'Department', title: 'Department'},
-                    {id: 'Email', title: 'Email'}
-                ]
-            });
-            response.send(csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(result.rows))
+            // Method #3
+            // const csvStringifier = createCsvStringifier({
+            //     header: [
+            //         {id: 'Id', title: 'Id'},
+            //         {id: 'Name', title: 'Name'},
+            //         {id: 'Department', title: 'Department'},
+            //         {id: 'Email', title: 'Email'}
+            //     ]
+            // });
+            // response.send(csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(result.rows))
         }
     })
 }
 
-app.get('/', streamDownloadHandler);
-app.get('/none', nonStreamDownloadHandler);
+app.get('/stream', streamDownloadHandler);
+app.get('/buffer', bufferDownloadHandler);
 
 app.listen(3000);

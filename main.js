@@ -22,12 +22,12 @@ var streamDownloadHandler = async function (request, response) {
         if (err) console.log("pool.connect()", err.stack)
 
         const query = new QueryStream(`SELECT * FROM "Employees" LIMIT 1000000`);
+
         var stream = client.query(query);
+        stream.on('end', () => client.end());
 
         writer.pipe(response)
         stream.pipe(writer)
-
-        client.release()
     })
 }
 
